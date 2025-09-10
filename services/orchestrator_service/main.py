@@ -2,6 +2,7 @@ import os
 import json
 import time
 from typing import List, Dict, Any, Optional
+import requests
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
@@ -113,6 +114,7 @@ def get_processing_status() -> Dict[str, Any]:
 def process_local_codebase():
     """
     Process files inside the local code_base folder with enhanced error handling and progress tracking.
+    Sends chunks directly to VectorDB (8001) and Neo4j (8002) instead of storing locally.
     """
     start_time = time.time()
     print(f"🚀 Starting ingestion for local folder: {CODE_BASE_DIR}")
@@ -192,15 +194,14 @@ def process_local_codebase():
                     'error': str(e)
                 })
 
-        # Save results
-        print(f"💾 Saving {len(all_chunks)} chunks to {OUTPUT_JSON}")
-        update_processing_status('saving', {
-            'message': f'Saving {len(all_chunks)} chunks to file',
+        # Instead of saving to file, POST to services
+        print(f"📡 Sending {len(all_chunks)} chunks to external services...")
+        update_processing_status('sending', {
+            'message': f'Sending {len(all_chunks)} chunks to VectorDB and Neo4j',
             'progress': processing_stats
         })
-        
-        # Create a comprehensive output structure
-        output_data = {
+
+        payload = {
             'metadata': {
                 'generated_at': time.time(),
                 'processing_time_seconds': round(time.time() - start_time, 2),
@@ -209,24 +210,36 @@ def process_local_codebase():
             },
             'chunks': all_chunks
         }
-        
-        with open(OUTPUT_JSON, 'w', encoding='utf-8') as f:
-            json.dump(output_data, f, indent=2, ensure_ascii=False)
-        
+
+        errors = []
+        for target in ["http://localhost:8001/ingest", "http://localhost:8002/ingest"]:
+            try:
+                resp = requests.post(target, json=payload, timeout=60)
+                if resp.status_code != 200:
+                    errors.append({target: resp.text})
+                    print(f"❌ Failed sending to {target}: {resp.text}")
+                else:
+                    print(f"✅ Successfully sent to {target}")
+            except Exception as e:
+                errors.append({target: str(e)})
+                print(f"💥 Error sending to {target}: {e}")
+
         # Final status update
         final_stats = processing_stats.copy()
         final_stats['processing_time'] = round(time.time() - start_time, 2)
         
-        update_processing_status('completed', {
-            'message': f'Successfully processed {processing_stats["processed_files"]} files, generated {len(all_chunks)} chunks',
-            'stats': final_stats,
-            'output_file': OUTPUT_JSON
-        })
+        update_processing_status(
+            'completed' if not errors else 'completed_with_errors',
+            {
+                'message': f'Successfully processed {processing_stats["processed_files"]} files, generated {len(all_chunks)} chunks',
+                'stats': final_stats,
+                'errors': errors
+            }
+        )
         
         print(f"✅ Ingestion complete!")
         print(f"📊 Stats: {final_stats}")
         print(f"⏱️  Processing time: {final_stats['processing_time']} seconds")
-        print(f"💾 Output saved to: {OUTPUT_JSON}")
 
     except Exception as e:
         error_msg = f"Critical error during processing: {str(e)}"
@@ -377,6 +390,55 @@ async def clear_results():
         "message": "Results cleared",
         "cleared_files": cleared
     }
+
+@app.post("/ingest/direct")
+async def ingest_and_forward(request: IngestRequest):
+    """
+    Ingest the code_base and directly forward chunks to VectorDB and Neo4j
+    without saving to disk.
+    """
+    try:
+        # Discover files
+        discovered_files = discover_code_files(CODE_BASE_DIR)
+        if not discovered_files:
+            return {"message": "No supported code files found", "stats": {}}
+
+        all_chunks = []
+        stats = {"processed_files": 0, "total_chunks": 0, "languages": {}}
+
+        # Process each file
+        for file_path in discovered_files:
+            chunks = chunking.parse_file(file_path, base_dir=CODE_BASE_DIR)
+            if chunks:
+                all_chunks.extend(chunks)
+                stats["total_chunks"] += len(chunks)
+                for c in chunks:
+                    lang = c.get("language", "unknown")
+                    stats["languages"][lang] = stats["languages"].get(lang, 0) + 1
+            stats["processed_files"] += 1
+
+        # Forward results
+        forwarding_results = {}
+        try:
+            r1 = requests.post("http://localhost:8001/vectordb/ingest", json={"chunks": all_chunks})
+            forwarding_results["vectordb"] = "success" if r1.ok else f"error {r1.status_code}"
+        except Exception as e:
+            forwarding_results["vectordb"] = f"failed: {str(e)}"
+
+        try:
+            r2 = requests.post("http://localhost:8002/neo4j/ingest", json={"chunks": all_chunks})
+            forwarding_results["neo4j"] = "success" if r2.ok else f"error {r2.status_code}"
+        except Exception as e:
+            forwarding_results["neo4j"] = f"failed: {str(e)}"
+
+        return {
+            "message": "Ingestion complete and forwarded to VectorDB + Neo4j",
+            "stats": stats,
+            "forwarding_results": forwarding_results,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # --------------------------------------------------------------------------
 # BLOCK 5: Application startup

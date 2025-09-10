@@ -12,17 +12,17 @@ import chromadb
 from chromadb.config import Settings
 import groq
 from sentence_transformers import SentenceTransformer
-from dotenv import load_dotenv  # <-- Import dotenv
+from dotenv import load_dotenv
 
 # --------------------------------------------------------------------------
 # Load .env variables
 # --------------------------------------------------------------------------
-load_dotenv()  # <-- Loads environment variables from .env automatically
+load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     print("⚠️ Warning: GROQ_API_KEY not set in environment variables")
 else:
-    print("✅ GROQ_API_KEY loaded successfully")  # Optional: confirm loaded
+    print("✅ GROQ_API_KEY loaded successfully")
 
 # --------------------------------------------------------------------------
 # Configuration
@@ -41,14 +41,14 @@ class QueryRequest(BaseModel):
     max_results: Optional[int] = 5
     similarity_threshold: Optional[float] = 0.7
 
-class IngestJsonRequest(BaseModel):
-    json_filename: str
-
 class QueryResponse(BaseModel):
     query: str
     answer: str
     relevant_chunks: List[Dict[str, Any]]
     processing_time: float
+
+class DirectIngestRequest(BaseModel):
+    chunks: List[Dict[str, Any]]
 
 # --------------------------------------------------------------------------
 # Vector Database Manager
@@ -64,7 +64,6 @@ class VectorDBManager:
     def setup_clients(self):
         print("🔧 Initializing Vector DB Manager...")
 
-        # Embedding model
         try:
             print("📥 Loading embedding model...")
             self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -73,7 +72,6 @@ class VectorDBManager:
             print(f"❌ Error loading embedding model: {e}")
             raise
 
-        # ChromaDB Client
         try:
             print("🗄️ Initializing ChromaDB Client...")
             CHROMA_DB_PATH.mkdir(exist_ok=True)
@@ -86,7 +84,6 @@ class VectorDBManager:
             print(f"❌ Error initializing ChromaDB: {e}")
             raise
 
-        # Groq client
         if GROQ_API_KEY:
             try:
                 self.groq_client = groq.Groq(api_key=GROQ_API_KEY)
@@ -104,7 +101,7 @@ class VectorDBManager:
         except Exception:
             raise HTTPException(
                 status_code=404,
-                detail="Collection not found. Please ingest a file first using /ingest."
+                detail="Collection not found. Please ingest chunks first."
             )
 
     def generate_chunk_id(self, chunk: Dict[str, Any]) -> str:
@@ -121,80 +118,10 @@ class VectorDBManager:
         if chunk.get('code'): parts.append(f"Code:\n{chunk['code']}")
         return "\n".join(parts)
 
-    def ingest_json_chunks(self, json_file_path: Path) -> Dict[str, Any]:
-        start_time = time.time()
-        try:
-            print("🗑️ Clearing existing collection...")
-            self.chroma_client.delete_collection(name=COLLECTION_NAME)
-        except Exception:
-            print(f"ℹ️ No collection to clear.")
-
-        print(f"📝 Creating collection: {COLLECTION_NAME}")
-        self.collection = self.chroma_client.create_collection(
-            name=COLLECTION_NAME,
-            metadata={"description": "Code chunks for RAG"}
-        )
-
-        if not json_file_path.exists():
-            raise FileNotFoundError(f"JSON not found: {json_file_path}")
-
-        print(f"📖 Loading chunks from {json_file_path}")
-        with open(json_file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        chunks = data.get("chunks", data) if isinstance(data, dict) else data
-        if not chunks:
-            raise Exception("No chunks found in JSON")
-
-        processed_count = 0
-        failed_count = 0
-        batch_size = 100
-
-        for i in range(0, len(chunks), batch_size):
-            batch_chunks = chunks[i:i + batch_size]
-            batch_ids, batch_embeddings, batch_documents, batch_metadatas = [], [], [], []
-
-            for chunk in batch_chunks:
-                try:
-                    chunk_id = self.generate_chunk_id(chunk)
-                    chunk_text = self.prepare_chunk_text(chunk)
-                    embedding = self.embedding_model.encode(chunk_text).tolist()
-                    metadata = {k: v for k, v in chunk.items() if k != "code" and v is not None}
-
-                    batch_ids.append(chunk_id)
-                    batch_embeddings.append(embedding)
-                    batch_documents.append(chunk_text)
-                    batch_metadatas.append(metadata)
-                    processed_count += 1
-                except Exception as e:
-                    print(f"⚠️ Error processing chunk: {e}")
-                    failed_count += 1
-
-            if batch_ids:
-                try:
-                    self.collection.add(
-                        ids=batch_ids,
-                        embeddings=batch_embeddings,
-                        documents=batch_documents,
-                        metadatas=batch_metadatas
-                    )
-                except Exception as e:
-                    print(f"❌ Error adding batch: {e}")
-                    failed_count += len(batch_ids)
-
-        processing_time = time.time() - start_time
-        return {
-            "status": "completed",
-            "total_chunks": len(chunks),
-            "processed_count": processed_count,
-            "failed_count": failed_count,
-            "processing_time": round(processing_time, 2),
-            "collection_size": self.collection.count()
-        }
-
     def search_similar_chunks(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         collection = self._get_collection()
-        if collection.count() == 0: return []
+        if collection.count() == 0:
+            return []
 
         try:
             query_embedding = self.embedding_model.encode(query).tolist()
@@ -264,7 +191,7 @@ Answer:"""
             return f"Error generating answer: {str(e)}"
 
 # --------------------------------------------------------------------------
-# Global instance
+# Globals
 # --------------------------------------------------------------------------
 vector_db = None
 
@@ -287,7 +214,7 @@ def get_processing_status() -> Dict[str, Any]:
 # --------------------------------------------------------------------------
 # FastAPI App
 # --------------------------------------------------------------------------
-app = FastAPI(title="RAG Code Assistant", description="On-demand RAG service for code queries", version="2.0.0")
+app = FastAPI(title="RAG Code Assistant", version="2.0.0")
 
 @app.on_event("startup")
 async def startup_event():
@@ -299,29 +226,65 @@ async def startup_event():
 @app.get("/")
 async def root():
     db = get_vector_db()
-    return {"service": "RAG Code Assistant", "version": "2.0.0", "status": "running", "groq_available": db.groq_client is not None}
+    return {
+        "service": "RAG Code Assistant",
+        "version": "2.0.0",
+        "status": "running",
+        "groq_available": db.groq_client is not None
+    }
 
-@app.post("/ingest")
-async def ingest_json_file(request: IngestJsonRequest, background_tasks: BackgroundTasks):
-    json_file_path = INPUT_JSON_DIR / request.json_filename
-    if not json_file_path.exists():
-        raise HTTPException(404, f"File '{request.json_filename}' not found.")
-
+@app.post("/vectordb/ingest")
+async def ingest_chunks(request: DirectIngestRequest, background_tasks: BackgroundTasks):
     status = get_processing_status()
     if status.get('status') == 'processing':
         return JSONResponse(409, {"error": "Ingestion already in progress.", "status": status})
 
+    chunks = request.chunks  # avoid closure issues
+
     def task():
         try:
-            update_processing_status('processing', {'file': request.json_filename})
+            update_processing_status('processing', {'total_chunks': len(chunks)})
             db = get_vector_db()
-            result = db.ingest_json_chunks(json_file_path)
+            try:
+                db.chroma_client.delete_collection(name=COLLECTION_NAME)
+            except Exception:
+                pass
+            db.collection = db.chroma_client.create_collection(
+                name=COLLECTION_NAME,
+                metadata={"description": "Code chunks for RAG"}
+            )
+
+            processed_count, failed_count = 0, 0
+            for chunk in chunks:
+                try:
+                    chunk_id = db.generate_chunk_id(chunk)
+                    chunk_text = db.prepare_chunk_text(chunk)
+                    embedding = db.embedding_model.encode(chunk_text).tolist()
+                    metadata = {k: v for k, v in chunk.items() if k != "code" and v is not None}
+                    db.collection.add(
+                        ids=[chunk_id],
+                        embeddings=[embedding],
+                        documents=[chunk_text],
+                        metadatas=[metadata]
+                    )
+                    processed_count += 1
+                except Exception as e:
+                    print(f"⚠️ Failed on chunk: {e}")
+                    failed_count += 1
+
+            result = {
+                "status": "completed",
+                "total_chunks": len(chunks),
+                "processed_count": processed_count,
+                "failed_count": failed_count,
+                "collection_size": db.collection.count()
+            }
             update_processing_status('completed', result)
         except Exception as e:
             update_processing_status('error', {'message': str(e)})
 
     background_tasks.add_task(task)
-    return {"message": f"Ingestion of '{request.json_filename}' started.", "status": "initiated"}
+    return {"message": "Direct ingestion started.", "status": "initiated"}
 
 @app.get("/status")
 async def get_status():
@@ -335,7 +298,12 @@ async def query_code(request: QueryRequest) -> QueryResponse:
     if request.similarity_threshold:
         relevant_chunks = [c for c in relevant_chunks if c['similarity_score'] >= request.similarity_threshold]
     answer = db.generate_answer_with_groq(request.query, relevant_chunks)
-    return QueryResponse(query=request.query, answer=answer, relevant_chunks=relevant_chunks, processing_time=round(time.time() - start_time, 3))
+    return QueryResponse(
+        query=request.query,
+        answer=answer,
+        relevant_chunks=relevant_chunks,
+        processing_time=round(time.time() - start_time, 3)
+    )
 
 @app.get("/collection/info")
 async def get_collection_info():
@@ -353,11 +321,6 @@ async def clear_collection():
     except Exception:
         return {"message": "Collection did not exist or could not be cleared."}
 
-@app.get("/files")
-async def list_json_files():
-    files = [{"filename": f.name, "size_mb": round(f.stat().st_size / (1024*1024), 2)} for f in INPUT_JSON_DIR.glob("*.json")]
-    return {"input_directory": str(INPUT_JSON_DIR), "json_files": files}
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)  # <<< pick the right port

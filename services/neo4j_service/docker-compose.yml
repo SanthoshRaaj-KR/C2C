@@ -1,0 +1,16 @@
+services:
+  # The Neo4j Database Service
+  neo4j:
+    image: neo4j:5
+    container_name: neo4j_c2c
+    ports:
+      - "7474:7474"  # For the Neo4j Browser UI
+      - "7687:7687"  # For the Bolt driver connection from Python
+    volumes:
+      - neo4j_data:/data
+    environment:
+      - NEO4J_AUTH=neo4j/password # IMPORTANT: Change 'password' to a secure one
+
+# This section ensures your data is saved even when you stop the container
+volumes:
+  neo4j_data:
