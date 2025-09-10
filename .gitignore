@@ -1,0 +1,108 @@
+venv
+# =========================================
+# OS-specific files
+# =========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# =========================================
+# Python
+# =========================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.log
+
+# =========================================
+# Node.js
+# =========================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+package-lock.json
+yarn.lock
+
+# =========================================
+# Java
+# =========================================
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+*.log
+*.tmp
+hs_err_pid*
+
+# =========================================
+# C / C++
+# =========================================
+*.o
+*.obj
+*.so
+*.exe
+*.out
+*.dll
+
+# =========================================
+# Environments
+# =========================================
+.env
+.venv/
+venv/
+env/
+ENV/
+*.env
+
+# =========================================
+# IDE / Editor files
+# =========================================
+# VS Code
+.vscode/
+.history/
+
+# IntelliJ / JetBrains
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Sublime
+*.sublime-workspace
+*.sublime-project
+
+# Eclipse
+.settings/
+.project
+.classpath
+
+# =========================================
+# Logs & misc
+# =========================================
+*.log
+*.tmp
+*.swp
+*.swo
+
