@@ -1,0 +1,56 @@
+[
+    {
+        "file_path": "test.py",
+        "class_name": null,
+        "function_name": "greet_user",
+        "type": "function",
+        "chunk_no": 1,
+        "code": "def greet_user(name: str):\n    \"\"\"Print a greeting message\"\"\"\n    print(f\"Hello, {name}!\")",
+        "id": "test.py::None::greet_user::1"
+    },
+    {
+        "file_path": "test.py",
+        "class_name": "User",
+        "function_name": null,
+        "type": "class",
+        "chunk_no": 1,
+        "code": "class User:\n    \"\"\"User class to handle authentication\"\"\"\n    \n    def __init__(self, username, password):\n        self.username = username\n        self.password = password\n    \n    def login(self):\n        \"\"\"Simulate login\"\"\"\n        if self.password == \"1234\":\n            print(f\"{self.username} logged in!\")\n        else:\n            print(\"Invalid credentials\")\n    \n    @staticmethod\n    def validate_username(name):",
+        "id": "test.py::User::None::1"
+    },
+    {
+        "file_path": "test.py",
+        "class_name": "Calculator",
+        "function_name": null,
+        "type": "class",
+        "chunk_no": 1,
+        "code": "class Calculator:\n    \n    def add(self, a, b):\n        return a + b\n    \n    def multiply(self, a, b):\n        return a * b\n\n    def factorial(self, n):",
+        "id": "test.py::Calculator::None::1"
+    },
+    {
+        "file_path": "test.py",
+        "class_name": null,
+        "function_name": "decorator",
+        "type": "function",
+        "chunk_no": 1,
+        "code": "def decorator(func):\n    def wrapper(*args, **kwargs):\n        print(\"Function is called\")\n        return func(*args, **kwargs)\n    return wrapper",
+        "id": "test.py::None::decorator::1"
+    },
+    {
+        "file_path": "test.py",
+        "class_name": null,
+        "function_name": "say_hello",
+        "type": "function",
+        "chunk_no": 1,
+        "code": "def say_hello():\n    print(\"Hello!\")",
+        "id": "test.py::None::say_hello::1"
+    },
+    {
+        "file_path": "test.py",
+        "class_name": null,
+        "function_name": "square",
+        "type": "function",
+        "chunk_no": 1,
+        "code": "def square(x): return x * x",
+        "id": "test.py::None::square::1"
+    }
+]
