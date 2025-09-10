@@ -47,7 +47,7 @@ def discover_code_files(root_dir: str) -> List[str]:
         '.woff', '.woff2', '.ttf', '.otf', '.eot',
         '.mp4', '.mp3', '.wav', '.avi', '.mov',
         '.exe', '.dll', '.so', '.dylib',
-        '.min.js', '.min.css'  
+        '.min.js', '.min.css'  # Minified files
     }
     
     SUPPORTED_EXTENSIONS = {

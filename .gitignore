@@ -106,3 +106,7 @@ ENV/
 *.swp
 *.swo
 
+chroma
+chroma_db
+input_json
+code_base
