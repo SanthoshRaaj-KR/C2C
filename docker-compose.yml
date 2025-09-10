@@ -1,0 +1,29 @@
+# This file is the "recipe" for your project's databases.
+version: '3.8'
+
+services:
+  # The Neo4j Database Service
+  neo4j:
+    image: neo4j:5
+    container_name: neo4j_c2c
+    ports:
+      - "7474:7474"  # For the Neo4j Browser UI
+      - "7687:7687"  # For the Bolt driver connection from Python
+    volumes:
+      - neo4j_data:/data
+    environment:
+      - NEO4J_AUTH=neo4j/password # IMPORTANT: Change 'password' to a secure one
+
+  # The ChromaDB Database Service
+  chromadb:
+    image: chromadb/chroma
+    container_name: chromadb_c2c
+    ports:
+      - "8001:8000" # We use 8001 on our machine to avoid clashes with Python services
+    volumes:
+      - chromadb_data:/chroma/.chroma/index
+
+# This section ensures your data is saved even when you stop the containers
+volumes:
+  neo4j_data:
+  chromadb_data:
