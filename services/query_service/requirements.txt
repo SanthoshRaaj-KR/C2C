@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+chromadb
+sentence-transformers
+neo4j
+groq
+python-dotenv
+requests
+torch
+javalang

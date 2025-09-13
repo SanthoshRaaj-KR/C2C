@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # Service 1: For the orchestrator.py
+  orchestrator-service:
+    build: .  # Build the image from the Dockerfile in the current directory
+    container_name: orchestrator_container
+    command: uvicorn orchestrator:app --host 0.0.0.0 --port 8003 --reload
+    ports:
+      - "8000:8003"  # Map host port 8000 to container port 8000
+    volumes:
+      - .:/app  # Mount current directory to /app for live code changes
+    env_file:
+      - .env  # Load environment variables from .env file
+
+  # Service 2: For the vectordb.py
+  vectordb-service:
+    build: .
+    container_name: vectordb_container
+    command: uvicorn vectordb:app --host 0.0.0.0 --port 8004 --reload
+    ports:
+      - "8001:8004"  # Use a different port
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+
+  # Service 3: For the neo4j.py
+  neo4j-api-service:
+    build: .
+    container_name: neo4j_api_container
+    command: uvicorn neo4j:app --host 0.0.0.0 --port 8005 --reload
+    ports:
+      - "8002:8005"  # Use another different port
+    volumes:
+      - .:/app
+    env_file:
+      - .env

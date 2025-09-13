@@ -290,20 +290,6 @@ async def ingest_chunks(request: DirectIngestRequest, background_tasks: Backgrou
 async def get_status():
     return get_processing_status()
 
-@app.post("/query")
-async def query_code(request: QueryRequest) -> QueryResponse:
-    start_time = time.time()
-    db = get_vector_db()
-    relevant_chunks = db.search_similar_chunks(request.query, max_results=request.max_results)
-    if request.similarity_threshold:
-        relevant_chunks = [c for c in relevant_chunks if c['similarity_score'] >= request.similarity_threshold]
-    answer = db.generate_answer_with_groq(request.query, relevant_chunks)
-    return QueryResponse(
-        query=request.query,
-        answer=answer,
-        relevant_chunks=relevant_chunks,
-        processing_time=round(time.time() - start_time, 3)
-    )
 
 @app.get("/collection/info")
 async def get_collection_info():

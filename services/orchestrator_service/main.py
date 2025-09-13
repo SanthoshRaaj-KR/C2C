@@ -212,17 +212,21 @@ def process_local_codebase():
         }
 
         errors = []
-        for target in ["http://localhost:8001/ingest", "http://localhost:8002/ingest"]:
-            try:
-                resp = requests.post(target, json=payload, timeout=60)
-                if resp.status_code != 200:
-                    errors.append({target: resp.text})
-                    print(f"❌ Failed sending to {target}: {resp.text}")
-                else:
-                    print(f"✅ Successfully sent to {target}")
-            except Exception as e:
-                errors.append({target: str(e)})
-                print(f"💥 Error sending to {target}: {e}")
+        targets = [
+            "http://localhost:8001/vectordb/ingest",  # ChromaDB service
+            "http://localhost:8002/neo4j/ingest"     # Neo4j service
+        ]
+        for target in targets:
+                try:
+                    resp = requests.post(target, json=payload, timeout=60)
+                    if resp.status_code != 200:
+                        errors.append({target: resp.text})
+                        print(f"❌ Failed sending to {target}: {resp.text}")
+                    else:
+                        print(f"✅ Successfully sent to {target}")
+                except Exception as e:
+                    errors.append({target: str(e)})
+                    print(f"💥 Error sending to {target}: {e}")
 
         # Final status update
         final_stats = processing_stats.copy()
