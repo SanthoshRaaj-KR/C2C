@@ -109,12 +109,12 @@ def get_processing_status() -> Dict[str, Any]:
     return {'status': 'idle', 'timestamp': 0, 'progress': {}}
 
 # --------------------------------------------------------------------------
-# BLOCK 3: Enhanced Core Ingestion Logic
+# BLOCK 3: Enhanced Core Ingestion Logic - FIXED
 # --------------------------------------------------------------------------
 def process_local_codebase():
     """
     Process files inside the local code_base folder with enhanced error handling and progress tracking.
-    Sends chunks directly to VectorDB (8001) and Neo4j (8002) instead of storing locally.
+    Sends chunks directly to VectorDB (8001) and Neo4j (8002) with CORRECT formats.
     """
     start_time = time.time()
     print(f"🚀 Starting ingestion for local folder: {CODE_BASE_DIR}")
@@ -194,56 +194,98 @@ def process_local_codebase():
                     'error': str(e)
                 })
 
-        # Instead of saving to file, POST to services
+        # 🔥 FIXED: Send data in the correct format to each service
         print(f"📡 Sending {len(all_chunks)} chunks to external services...")
         update_processing_status('sending', {
             'message': f'Sending {len(all_chunks)} chunks to VectorDB and Neo4j',
             'progress': processing_stats
         })
 
-        payload = {
-            'metadata': {
-                'generated_at': time.time(),
-                'processing_time_seconds': round(time.time() - start_time, 2),
-                'codebase_path': CODE_BASE_DIR,
-                'stats': processing_stats
-            },
-            'chunks': all_chunks
-        }
-
         errors = []
-        targets = [
-            "http://localhost:8001/vectordb/ingest",  # ChromaDB service
-            "http://localhost:8002/neo4j/ingest"     # Neo4j service
-        ]
-        for target in targets:
-                try:
-                    resp = requests.post(target, json=payload, timeout=60)
-                    if resp.status_code != 200:
-                        errors.append({target: resp.text})
-                        print(f"❌ Failed sending to {target}: {resp.text}")
-                    else:
-                        print(f"✅ Successfully sent to {target}")
-                except Exception as e:
-                    errors.append({target: str(e)})
-                    print(f"💥 Error sending to {target}: {e}")
+        
+        # 1️⃣ Send to ChromaDB - expects {chunks: [...]}
+        try:
+            chromadb_payload = {"chunks": all_chunks}  # ✅ Direct chunks array
+            
+            print("📤 Sending to ChromaDB service...")
+            resp = requests.post(
+                "http://localhost:8001/vectordb/ingest", 
+                json=chromadb_payload, 
+                timeout=120
+            )
+            if resp.status_code != 200:
+                errors.append({"chromadb": f"HTTP {resp.status_code}: {resp.text}"})
+                print(f"❌ ChromaDB failed: {resp.text}")
+            else:
+                print("✅ Successfully sent to ChromaDB")
+                print(f"📊 ChromaDB response: {resp.json()}")
+        except Exception as e:
+            errors.append({"chromadb": str(e)})
+            print(f"💥 ChromaDB error: {e}")
+
+        # 2️⃣ Send to Neo4j - expects {chunks: [{id: str, code: str}]}
+        try:
+            # Transform chunks to Neo4j format
+            neo4j_chunks = []
+            for chunk in all_chunks:
+                neo4j_chunks.append({
+                    "id": chunk.get("id", f"unknown_{int(time.time())}"),
+                    "code": chunk.get("code", "")
+                })
+            
+            neo4j_payload = {"chunks": neo4j_chunks}  # ✅ Simplified format
+            
+            print("📤 Sending to Neo4j service...")
+            resp = requests.post(
+                "http://localhost:8002/neo4j/ingest", 
+                json=neo4j_payload, 
+                timeout=120
+            )
+            if resp.status_code != 200:
+                errors.append({"neo4j": f"HTTP {resp.status_code}: {resp.text}"})
+                print(f"❌ Neo4j failed: {resp.text}")
+            else:
+                print("✅ Successfully sent to Neo4j")
+                print(f"📊 Neo4j response: {resp.json()}")
+        except Exception as e:
+            errors.append({"neo4j": str(e)})
+            print(f"💥 Neo4j error: {e}")
+
+        # 3️⃣ Save local backup for debugging
+        try:
+            local_payload = {
+                'metadata': {
+                    'generated_at': time.time(),
+                    'processing_time_seconds': round(time.time() - start_time, 2),
+                    'codebase_path': CODE_BASE_DIR,
+                    'stats': processing_stats
+                },
+                'chunks': all_chunks
+            }
+            
+            with open(OUTPUT_JSON, 'w', encoding='utf-8') as f:
+                json.dump(local_payload, f, indent=2)
+            print(f"💾 Local backup saved to {OUTPUT_JSON}")
+        except Exception as e:
+            print(f"⚠️ Could not save local backup: {e}")
 
         # Final status update
         final_stats = processing_stats.copy()
         final_stats['processing_time'] = round(time.time() - start_time, 2)
         
-        update_processing_status(
-            'completed' if not errors else 'completed_with_errors',
-            {
-                'message': f'Successfully processed {processing_stats["processed_files"]} files, generated {len(all_chunks)} chunks',
-                'stats': final_stats,
-                'errors': errors
-            }
-        )
+        status = 'completed' if not errors else 'completed_with_errors'
+        update_processing_status(status, {
+            'message': f'Successfully processed {processing_stats["processed_files"]} files, generated {len(all_chunks)} chunks',
+            'stats': final_stats,
+            'service_errors': errors,
+            'services_successful': 2 - len(errors)
+        })
         
         print(f"✅ Ingestion complete!")
         print(f"📊 Stats: {final_stats}")
         print(f"⏱️  Processing time: {final_stats['processing_time']} seconds")
+        if errors:
+            print(f"⚠️  Service errors: {len(errors)}")
 
     except Exception as e:
         error_msg = f"Critical error during processing: {str(e)}"
@@ -260,7 +302,7 @@ def process_local_codebase():
 app = FastAPI(
     title="Code-to-Chunks (C2C) Orchestrator Service",
     description="Service for parsing and chunking codebases into manageable pieces",
-    version="2.0.0"
+    version="2.1.0"
 )
 
 class IngestRequest(BaseModel):
@@ -278,9 +320,13 @@ async def root():
     """Health check endpoint"""
     return {
         "service": "Code-to-Chunks Orchestrator", 
-        "version": "2.0.0",
+        "version": "2.1.0",
         "status": "running",
-        "supported_languages": ["Python", "Java", "JavaScript", "TypeScript"]
+        "supported_languages": ["Python", "Java", "JavaScript", "TypeScript"],
+        "services": {
+            "chromadb": "http://localhost:8001",
+            "neo4j": "http://localhost:8002"
+        }
     }
 
 @app.post("/ingest")
@@ -399,8 +445,10 @@ async def clear_results():
 async def ingest_and_forward(request: IngestRequest):
     """
     Ingest the code_base and directly forward chunks to VectorDB and Neo4j
-    without saving to disk.
+    with proper format handling - SYNCHRONOUS VERSION
     """
+    start_time = time.time()
+    
     try:
         # Discover files
         discovered_files = discover_code_files(CODE_BASE_DIR)
@@ -421,17 +469,23 @@ async def ingest_and_forward(request: IngestRequest):
                     stats["languages"][lang] = stats["languages"].get(lang, 0) + 1
             stats["processed_files"] += 1
 
-        # Forward results
+        # Forward results with correct formats
         forwarding_results = {}
+        
+        # ChromaDB - expects {chunks: [...]}
         try:
-            r1 = requests.post("http://localhost:8001/vectordb/ingest", json={"chunks": all_chunks})
-            forwarding_results["vectordb"] = "success" if r1.ok else f"error {r1.status_code}"
+            chromadb_payload = {"chunks": all_chunks}
+            r1 = requests.post("http://localhost:8001/vectordb/ingest", json=chromadb_payload, timeout=60)
+            forwarding_results["vectordb"] = "success" if r1.ok else f"error {r1.status_code}: {r1.text[:100]}"
         except Exception as e:
             forwarding_results["vectordb"] = f"failed: {str(e)}"
 
+        # Neo4j - expects {chunks: [{id: str, code: str}]}
         try:
-            r2 = requests.post("http://localhost:8002/neo4j/ingest", json={"chunks": all_chunks})
-            forwarding_results["neo4j"] = "success" if r2.ok else f"error {r2.status_code}"
+            neo4j_chunks = [{"id": c.get("id", ""), "code": c.get("code", "")} for c in all_chunks]
+            neo4j_payload = {"chunks": neo4j_chunks}
+            r2 = requests.post("http://localhost:8002/neo4j/ingest", json=neo4j_payload, timeout=60)
+            forwarding_results["neo4j"] = "success" if r2.ok else f"error {r2.status_code}: {r2.text[:100]}"
         except Exception as e:
             forwarding_results["neo4j"] = f"failed: {str(e)}"
 
@@ -439,10 +493,37 @@ async def ingest_and_forward(request: IngestRequest):
             "message": "Ingestion complete and forwarded to VectorDB + Neo4j",
             "stats": stats,
             "forwarding_results": forwarding_results,
+            "processing_time": round(time.time() - start_time, 2)
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@app.get("/health")
+async def health_check():
+    """Check health of all services"""
+    health_status = {
+        "orchestrator": "healthy",
+        "chromadb": "unknown",
+        "neo4j": "unknown",
+        "timestamp": time.time()
+    }
+    
+    # Check ChromaDB
+    try:
+        response = requests.get("http://localhost:8001/", timeout=5)
+        health_status["chromadb"] = "healthy" if response.ok else f"unhealthy: {response.status_code}"
+    except Exception as e:
+        health_status["chromadb"] = f"unreachable: {str(e)[:50]}"
+    
+    # Check Neo4j service
+    try:
+        response = requests.get("http://localhost:8002/", timeout=5) 
+        health_status["neo4j"] = "healthy" if response.ok else f"unhealthy: {response.status_code}"
+    except Exception as e:
+        health_status["neo4j"] = f"unreachable: {str(e)[:50]}"
+    
+    return health_status
 
 # --------------------------------------------------------------------------
 # BLOCK 5: Application startup
@@ -450,7 +531,7 @@ async def ingest_and_forward(request: IngestRequest):
 @app.on_event("startup")
 async def startup_event():
     """Initialize the application"""
-    print(f"🚀 C2C Orchestrator Service starting...")
+    print(f"🚀 C2C Orchestrator Service v2.1.0 starting...")
     print(f"📁 Codebase directory: {CODE_BASE_DIR}")
     print(f"💾 Output file: {OUTPUT_JSON}")
     

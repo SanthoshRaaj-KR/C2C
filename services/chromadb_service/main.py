@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import chromadb
 from chromadb.config import Settings
-import groq
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 
@@ -18,11 +17,6 @@ from dotenv import load_dotenv
 # Load .env variables
 # --------------------------------------------------------------------------
 load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    print("⚠️ Warning: GROQ_API_KEY not set in environment variables")
-else:
-    print("✅ GROQ_API_KEY loaded successfully")
 
 # --------------------------------------------------------------------------
 # Configuration
@@ -40,15 +34,24 @@ class QueryRequest(BaseModel):
     query: str
     max_results: Optional[int] = 5
     similarity_threshold: Optional[float] = 0.7
+    search_by_id: Optional[bool] = False
 
 class QueryResponse(BaseModel):
     query: str
-    answer: str
     relevant_chunks: List[Dict[str, Any]]
     processing_time: float
+    total_results: int
 
 class DirectIngestRequest(BaseModel):
     chunks: List[Dict[str, Any]]
+
+class ChunkByIdRequest(BaseModel):
+    chunk_ids: List[str]
+
+class BatchQueryRequest(BaseModel):
+    queries: List[str]
+    max_results_per_query: Optional[int] = 5
+    similarity_threshold: Optional[float] = 0.7
 
 # --------------------------------------------------------------------------
 # Vector Database Manager
@@ -58,7 +61,6 @@ class VectorDBManager:
         self.embedding_model = None
         self.chroma_client = None
         self.collection = None
-        self.groq_client = None
         self.setup_clients()
 
     def setup_clients(self):
@@ -84,16 +86,6 @@ class VectorDBManager:
             print(f"❌ Error initializing ChromaDB: {e}")
             raise
 
-        if GROQ_API_KEY:
-            try:
-                self.groq_client = groq.Groq(api_key=GROQ_API_KEY)
-                print("✅ Groq client initialized")
-            except Exception as e:
-                print(f"❌ Error initializing Groq client: {e}")
-                self.groq_client = None
-        else:
-            print("⚠️ Groq client not initialized - API key missing")
-
     def _get_collection(self):
         try:
             self.collection = self.chroma_client.get_collection(name=COLLECTION_NAME)
@@ -118,7 +110,7 @@ class VectorDBManager:
         if chunk.get('code'): parts.append(f"Code:\n{chunk['code']}")
         return "\n".join(parts)
 
-    def search_similar_chunks(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    def search_similar_chunks(self, query: str, max_results: int = 5, similarity_threshold: float = 0.7) -> List[Dict[str, Any]]:
         collection = self._get_collection()
         if collection.count() == 0:
             return []
@@ -133,17 +125,25 @@ class VectorDBManager:
 
             formatted_results = []
             for i, doc in enumerate(results['documents'][0]):
+                distance = results['distances'][0][i]
+                similarity_score = 1 - distance
+                
+                # Apply similarity threshold
+                if similarity_score < similarity_threshold:
+                    continue
+                    
                 meta = results['metadatas'][0][i]
                 formatted_results.append({
                     'document': doc,
                     'metadata': meta,
-                    'similarity_score': 1 - results['distances'][0][i],
+                    'similarity_score': similarity_score,
                     'chunk_info': {
                         'file': meta.get('file_path', ''),
                         'function': meta.get('function_name', ''),
                         'class': meta.get('class_name', ''),
                         'type': meta.get('type', ''),
-                        'language': meta.get('language', '')
+                        'language': meta.get('language', ''),
+                        'id': meta.get('id', '')
                     }
                 })
             return formatted_results
@@ -151,44 +151,87 @@ class VectorDBManager:
             print(f"❌ Error searching chunks: {e}")
             return []
 
-    def generate_answer_with_groq(self, query: str, relevant_chunks: List[Dict[str, Any]]) -> str:
-        if not self.groq_client:
-            return "Groq client not available. Please set GROQ_API_KEY."
-        if not relevant_chunks:
-            return "No relevant code chunks found."
-
-        context_parts = []
-        for i, chunk in enumerate(relevant_chunks[:3]):
-            ci = chunk['chunk_info']
-            context_parts.append(f"""
-Code Chunk {i+1}:
-File: {ci['file']}
-Language: {ci['language']}
-Function/Class: {ci['function'] or ci['class'] or 'N/A'}
-Similarity: {chunk['similarity_score']:.3f}
-Code:
-{chunk['document']}
-""")
-        context = "\n" + "="*50 + "\n".join(context_parts) + "="*50
-        prompt = f"""You are a helpful coding assistant.
-User Question: {query}
-Relevant Code Context:{context}
-Answer:"""
+    def search_by_id(self, chunk_id: str) -> List[Dict[str, Any]]:
+        """Search for a chunk by its exact ID"""
+        collection = self._get_collection()
+        
+        if collection.count() == 0:
+            return []
 
         try:
-            response = self.groq_client.chat.completions.create(
-                model="llama-3.1-70b-versatile",
-                messages=[
-                    {"role": "system", "content": "You are a helpful coding assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1000,
-                temperature=0.1
-            )
-            return response.choices[0].message.content
+            # Try to get by exact ID first
+            try:
+                results = collection.get(ids=[chunk_id], include=['documents', 'metadatas'])
+                if results['documents']:
+                    doc = results['documents'][0]
+                    meta = results['metadatas'][0]
+                    return [{
+                        'document': doc,
+                        'metadata': meta,
+                        'similarity_score': 1.0,  # Perfect match
+                        'chunk_info': {
+                            'file': meta.get('file_path', ''),
+                            'function': meta.get('function_name', ''),
+                            'class': meta.get('class_name', ''),
+                            'type': meta.get('type', ''),
+                            'language': meta.get('language', ''),
+                            'id': meta.get('id', '')
+                        }
+                    }]
+            except:
+                pass
+            
+            # If exact ID search fails, try semantic search with the ID as query
+            return self.search_similar_chunks(chunk_id, max_results=3, similarity_threshold=0.3)
+            
         except Exception as e:
-            print(f"❌ Error generating answer with Groq: {e}")
-            return f"Error generating answer: {str(e)}"
+            print(f"❌ Error searching by ID {chunk_id}: {e}")
+            return []
+
+    def search_multiple_ids(self, chunk_ids: List[str]) -> List[Dict[str, Any]]:
+        """Search for multiple chunks by their IDs"""
+        all_results = []
+        for chunk_id in chunk_ids:
+            results = self.search_by_id(chunk_id)
+            all_results.extend(results)
+        return all_results
+
+    def batch_search(self, queries: List[str], max_results_per_query: int = 5, similarity_threshold: float = 0.7) -> Dict[str, List[Dict[str, Any]]]:
+        """Perform multiple searches in batch"""
+        results = {}
+        for query in queries:
+            results[query] = self.search_similar_chunks(query, max_results_per_query, similarity_threshold)
+        return results
+
+    def get_collection_stats(self) -> Dict[str, Any]:
+        """Get statistics about the collection"""
+        try:
+            collection = self._get_collection()
+            total_count = collection.count()
+            
+            # Get sample of metadata to understand the data
+            sample_data = collection.peek(limit=min(100, total_count))
+            languages = set()
+            types = set()
+            files = set()
+            
+            for meta in sample_data.get('metadatas', []):
+                if meta.get('language'):
+                    languages.add(meta['language'])
+                if meta.get('type'):
+                    types.add(meta['type'])
+                if meta.get('file_path'):
+                    files.add(meta['file_path'])
+            
+            return {
+                'total_chunks': total_count,
+                'languages': list(languages),
+                'types': list(types),
+                'sample_files': list(files)[:10],  # First 10 files
+                'collection_name': COLLECTION_NAME
+            }
+        except Exception as e:
+            return {'error': str(e)}
 
 # --------------------------------------------------------------------------
 # Globals
@@ -214,7 +257,7 @@ def get_processing_status() -> Dict[str, Any]:
 # --------------------------------------------------------------------------
 # FastAPI App
 # --------------------------------------------------------------------------
-app = FastAPI(title="RAG Code Assistant", version="2.0.0")
+app = FastAPI(title="VectorDB Service", version="2.0.0")
 
 @app.on_event("startup")
 async def startup_event():
@@ -225,14 +268,114 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    db = get_vector_db()
     return {
-        "service": "RAG Code Assistant",
+        "service": "VectorDB Service",
         "version": "2.0.0",
         "status": "running",
-        "groq_available": db.groq_client is not None
+        "collection_name": COLLECTION_NAME
     }
 
+# --------------------------------------------------------------------------
+# Query Endpoints (for Orchestrator)
+# --------------------------------------------------------------------------
+@app.post("/query")
+async def query_chunks(request: QueryRequest) -> QueryResponse:
+    """Main query endpoint for orchestrator"""
+    start_time = time.time()
+    
+    try:
+        db = get_vector_db()
+        
+        if request.search_by_id:
+            # Search by chunk ID
+            relevant_chunks = db.search_by_id(request.query)
+        else:
+            # Normal similarity search
+            relevant_chunks = db.search_similar_chunks(
+                request.query,
+                request.max_results,
+                request.similarity_threshold
+            )
+        
+        return QueryResponse(
+            query=request.query,
+            relevant_chunks=relevant_chunks,
+            processing_time=round(time.time() - start_time, 3),
+            total_results=len(relevant_chunks)
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+@app.post("/query/batch")
+async def batch_query(request: BatchQueryRequest):
+    """Batch query endpoint for multiple queries"""
+    start_time = time.time()
+    
+    try:
+        db = get_vector_db()
+        results = db.batch_search(
+            request.queries,
+            request.max_results_per_query,
+            request.similarity_threshold
+        )
+        
+        return {
+            "batch_results": results,
+            "processing_time": round(time.time() - start_time, 3),
+            "total_queries": len(request.queries)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Batch query failed: {str(e)}")
+
+@app.post("/query/by_ids")
+async def query_by_ids(request: ChunkByIdRequest):
+    """Query multiple chunks by their IDs"""
+    start_time = time.time()
+    
+    try:
+        db = get_vector_db()
+        results = db.search_multiple_ids(request.chunk_ids)
+        
+        return {
+            "chunks": results,
+            "processing_time": round(time.time() - start_time, 3),
+            "requested_ids": request.chunk_ids,
+            "found_chunks": len(results)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ID query failed: {str(e)}")
+
+@app.post("/query/filtered")
+async def filtered_query(request: dict):
+    """Query with metadata filters"""
+    start_time = time.time()
+    
+    try:
+        db = get_vector_db()
+        query = request.get("query", "")
+        filters = request.get("filters", {})
+        max_results = request.get("max_results", 5)
+        
+        # For now, just do regular search - can be enhanced later
+        results = db.search_similar_chunks(query, max_results)
+        
+        return {
+            "query": query,
+            "filters": filters,
+            "results": results,
+            "processing_time": round(time.time() - start_time, 3),
+            "total_results": len(results)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Filtered query failed: {str(e)}")
+
+# --------------------------------------------------------------------------
+# Management Endpoints
+# --------------------------------------------------------------------------
 @app.post("/vectordb/ingest")
 async def ingest_chunks(request: DirectIngestRequest, background_tasks: BackgroundTasks):
     status = get_processing_status()
@@ -261,6 +404,9 @@ async def ingest_chunks(request: DirectIngestRequest, background_tasks: Backgrou
                     chunk_text = db.prepare_chunk_text(chunk)
                     embedding = db.embedding_model.encode(chunk_text).tolist()
                     metadata = {k: v for k, v in chunk.items() if k != "code" and v is not None}
+                    # Add the ID to metadata for easier retrieval
+                    metadata['id'] = chunk_id
+                    
                     db.collection.add(
                         ids=[chunk_id],
                         embeddings=[embedding],
@@ -290,12 +436,21 @@ async def ingest_chunks(request: DirectIngestRequest, background_tasks: Backgrou
 async def get_status():
     return get_processing_status()
 
-
 @app.get("/collection/info")
 async def get_collection_info():
     db = get_vector_db()
     collection = db._get_collection()
     return {"collection_name": COLLECTION_NAME, "total_chunks": collection.count()}
+
+@app.get("/collection/stats")
+async def get_collection_stats():
+    """Get collection statistics"""
+    try:
+        db = get_vector_db()
+        stats = db.get_collection_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stats retrieval failed: {str(e)}")
 
 @app.delete("/collection")
 async def clear_collection():
@@ -307,6 +462,26 @@ async def clear_collection():
     except Exception:
         return {"message": "Collection did not exist or could not be cleared."}
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    try:
+        db = get_vector_db()
+        collection = db._get_collection()
+        count = collection.count()
+        return {
+            "status": "healthy",
+            "collection_exists": True,
+            "total_chunks": count,
+            "embedding_model": "all-MiniLM-L6-v2"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "collection_exists": False
+        }
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)  # <<< pick the right port
+    uvicorn.run(app, host="0.0.0.0", port=8001)
