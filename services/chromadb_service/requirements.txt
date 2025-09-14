@@ -1,9 +1,8 @@
 fastapi
 uvicorn[standard]
 pydantic
-requests
-python-dotenv
-groq
 chromadb
 sentence-transformers
-neo4j
+groq
+python-dotenv
+requests

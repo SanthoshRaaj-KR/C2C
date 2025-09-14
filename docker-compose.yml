@@ -1,29 +1,126 @@
-# This file is the "recipe" for your project's databases.
 version: '3.8'
 
 services:
-  # The Neo4j Database Service
-  neo4j:
+  # 1. Neo4j Database (Foundation)
+  neo4j-db:
     image: neo4j:5
-    container_name: neo4j_c2c
+    container_name: neo4j_database
     ports:
-      - "7474:7474"  # For the Neo4j Browser UI
-      - "7687:7687"  # For the Bolt driver connection from Python
+      - "7474:7474"  # Neo4j Browser UI
+      - "7687:7687"  # Bolt driver connection
     volumes:
       - neo4j_data:/data
     environment:
-      - NEO4J_AUTH=neo4j/password # IMPORTANT: Change 'password' to a secure one
+      - NEO4J_AUTH=neo4j/password
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - c2c_network
 
-  # The ChromaDB Database Service
-  chromadb:
-    image: chromadb/chroma
-    container_name: chromadb_c2c
+  # 2. ChromaDB Service (Vector Database)
+  chromadb-service:
+    build: ./services/chromadb_service
+    container_name: chromadb_service
     ports:
-      - "8001:8000" # We use 8001 on our machine to avoid clashes with Python services
+      - "8001:8001"
     volumes:
-      - chromadb_data:/chroma/.chroma/index
+      - ./services/chromadb_service/chroma_db:/app/chroma_db
+      - ./services/chromadb_service/input_json:/app/input_json
+      - ./.env:/app/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - c2c_network
 
-# This section ensures your data is saved even when you stop the containers
+  # 3. Neo4j API Service (Graph Database API)  
+  neo4j-service:
+    build: ./services/neo4j_service
+    container_name: neo4j_api_service
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./.env:/app/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NEO4J_URI=bolt://neo4j-db:7687
+      - NEO4J_PASSWORD=password
+    depends_on:
+      neo4j-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - c2c_network
+
+  # 4. Orchestrator Service (Code Processing)
+  orchestrator-service:
+    build: ./services/orchestrator_service
+    container_name: orchestrator_service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./services/orchestrator_service/code_base:/app/code_base
+      - ./.env:/app/.env
+      - ./services/orchestrator_service/chunking.py:/app/chunking.py
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CHROMADB_URL=http://chromadb-service:8001
+      - NEO4J_URL=http://neo4j-service:8002
+    depends_on:
+      chromadb-service:
+        condition: service_healthy
+      neo4j-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - c2c_network
+
+  # 5. Query Service (Query Orchestration)
+  query-service:
+    build: ./services/query_service
+    container_name: query_service
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./services/query_service/query_chroma_db:/app/query_chroma_db
+      - ./.env:/app/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - VECTORDB_URL=http://chromadb-service:8001
+      - NEO4J_URL=http://neo4j-service:8002
+    depends_on:
+      chromadb-service:
+        condition: service_healthy
+      neo4j-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - c2c_network
+
 volumes:
   neo4j_data:
-  chromadb_data:
+    driver: local
+
+networks:
+  c2c_network:
+    driver: bridge

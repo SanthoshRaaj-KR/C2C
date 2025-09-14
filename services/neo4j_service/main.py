@@ -90,6 +90,14 @@ def build_relationships(chunks: List[Chunk]) -> List[str]:
 # --------------------------------------------------------------------------
 # ENDPOINTS
 # --------------------------------------------------------------------------
+@app.get("/")
+async def root():
+    return {
+        "service": "C2C Neo4j Service",
+        "version": "1.0.0",
+        "status": "running"
+    }
+
 @app.post("/neo4j/ingest")
 async def ingest_chunks(request: Neo4jIngestRequest, http_request: Request):
     driver = http_request.app.state.driver
@@ -110,7 +118,7 @@ async def ingest_chunks(request: Neo4jIngestRequest, http_request: Request):
         for i, c in enumerate(chunks):
             tx.run(
                 node_queries[i],
-                code_=c.code
+                **{f"code_{i}": c.code}
             )
     try:
         with driver.session() as session:
@@ -149,3 +157,18 @@ async def query_graph(request: GraphQueryRequest, http_request: Request):
             records = session.execute_read(lambda tx: tx.run(cypher_query, target_id=request.target_id).data())
             results = records
     return {"query_type": request.query_type, "target_id": request.target_id, "results": results}
+
+@app.get("/health")
+async def health_check(http_request: Request):
+    try:
+        driver = http_request.app.state.driver
+        with driver.session() as session:
+            result = session.run("RETURN 1 as health_check")
+            record = result.single()
+            return {"status": "healthy", "database_connected": True}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8002)
