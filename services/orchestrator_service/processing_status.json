@@ -1,7 +1,21 @@
 {
-  "status": "idle",
-  "timestamp": 1757857162.7726479,
+  "status": "completed",
+  "timestamp": 1757860054.280342,
   "progress": {
-    "message": "Service started and ready"
+    "message": "Successfully processed 11 files, generated 23 chunks",
+    "stats": {
+      "total_files": 11,
+      "processed_files": 11,
+      "failed_files": 0,
+      "total_chunks": 23,
+      "languages": {
+        "python": 5,
+        "javascript": 18
+      },
+      "errors": [],
+      "processing_time": 5.81
+    },
+    "service_errors": [],
+    "services_successful": 2
   }
 }

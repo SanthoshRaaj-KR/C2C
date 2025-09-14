@@ -101,16 +101,24 @@ class VectorDBManager:
         return hashlib.md5(content.encode()).hexdigest()
 
     def prepare_chunk_text(self, chunk: Dict[str, Any]) -> str:
-        parts = []
-        if chunk.get('file_path'): parts.append(f"File: {chunk['file_path']}")
-        if chunk.get('language'): parts.append(f"Language: {chunk['language']}")
-        if chunk.get('class_name'): parts.append(f"Class: {chunk['class_name']}")
-        if chunk.get('function_name'): parts.append(f"Function: {chunk['function_name']}")
-        if chunk.get('type'): parts.append(f"Type: {chunk['type']}")
-        if chunk.get('code'): parts.append(f"Code:\n{chunk['code']}")
-        return "\n".join(parts)
+        """
+        FIXED: Creates a descriptive paragraph for each chunk to improve semantic search.
+        """
+        file_path = chunk.get('file_path', 'an unknown file')
+        language = chunk.get('language', 'an unspecified language')
+        chunk_type = chunk.get('type', 'code segment')
+        
+        description = f"This is a '{chunk_type}' from the file '{file_path}', written in {language}. "
+        
+        if chunk.get('class_name'):
+            description += f"It is part of the class '{chunk['class_name']}'. "
+        if chunk.get('function_name'):
+            description += f"Specifically, it is within the function '{chunk['function_name']}'. "
+            
+        description += f"The content is as follows:\n\n```\n{chunk.get('code', '')}\n```"
+        return description
 
-    def search_similar_chunks(self, query: str, max_results: int = 5, similarity_threshold: float = 0.7) -> List[Dict[str, Any]]:
+    def search_similar_chunks(self, query: str, max_results: int = 5, similarity_threshold: float = 0.3) -> List[Dict[str, Any]]:
         collection = self._get_collection()
         if collection.count() == 0:
             return []
