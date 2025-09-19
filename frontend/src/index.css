@@ -1,0 +1,46 @@
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: light dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Light Theme Variables */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f0f4f8;
+  --bg-tertiary: #e1e8f0;
+  --text-primary: #11151a;
+  --text-secondary: #5a6470;
+  --accent-primary: #007aff;
+  --accent-primary-hover: #0056b3;
+  --border-color: #d1d9e2;
+  --user-message-bg: #007aff;
+  --user-message-text: #ffffff;
+  --system-message-bg: #e5e5ea;
+  --system-message-text: #000000;
+}
+
+[data-theme='dark'] {
+  --bg-primary: #121212;
+  --bg-secondary: #1e1e1e;
+  --bg-tertiary: #2a2a2a;
+  --text-primary: #e1e1e1;
+  --text-secondary: #a0a0a0;
+  --accent-primary: #0a84ff;
+  --accent-primary-hover: #0060df;
+  --border-color: #3a3a3c;
+  --user-message-bg: #0a84ff;
+  --user-message-text: #ffffff;
+  --system-message-bg: #2c2c2e;
+  --system-message-text: #ffffff;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s, color 0.3s;
+}
