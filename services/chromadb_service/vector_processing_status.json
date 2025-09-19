@@ -1,11 +1,7 @@
 {
-  "status": "completed",
-  "timestamp": 1758286253.5623016,
+  "status": "ready",
+  "timestamp": 1758291749.4355783,
   "details": {
-    "status": "completed",
-    "total_chunks": 23,
-    "processed_count": 23,
-    "failed_count": 0,
-    "collection_size": 23
+    "message": "Service ready for ingestion."
   }
 }
