@@ -48,12 +48,12 @@ def discover_code_files(root_dir: str) -> List[str]:
         '.woff', '.woff2', '.ttf', '.otf', '.eot',
         '.mp4', '.mp3', '.wav', '.avi', '.mov',
         '.exe', '.dll', '.so', '.dylib',
-        '.min.js', '.min.css'  # Minified files
+        '.min.js', '.min.css'  
     }
     
     SUPPORTED_EXTENSIONS = {
         '.py', '.java', '.js', '.jsx', '.ts', '.tsx', 
-        '.mjs', '.cjs', '.vue'  # Added Vue support
+        '.mjs', '.cjs', '.vue' 
     }
 
     discovered_files = []

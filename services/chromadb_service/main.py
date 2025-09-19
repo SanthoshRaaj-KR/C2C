@@ -33,7 +33,7 @@ COLLECTION_NAME = "code_chunks"
 class QueryRequest(BaseModel):
     query: str
     max_results: Optional[int] = 5
-    similarity_threshold: Optional[float] = 0.7
+    similarity_threshold: Optional[float] = 0.5
     search_by_id: Optional[bool] = False
 
 class QueryResponse(BaseModel):
@@ -402,7 +402,7 @@ async def ingest_chunks(request: DirectIngestRequest, background_tasks: Backgrou
                 pass
             db.collection = db.chroma_client.create_collection(
                 name=COLLECTION_NAME,
-                metadata={"description": "Code chunks for RAG"}
+                metadata={"hnsw:space": "cosine"},
             )
 
             processed_count, failed_count = 0, 0
